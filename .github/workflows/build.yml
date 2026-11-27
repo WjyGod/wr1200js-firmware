@@ -1,0 +1,144 @@
+name: Build WR1200JS Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'ImmortalWrt 版本'
+        required: true
+        default: '21.02.7'
+        type: choice
+        options:
+          - '24.10.7'
+          - '23.05.7'
+          - '21.02.7'
+          - '25.12.2'
+      extra_packages:
+        description: '临时追加的插件（空格分隔，可留空）'
+        required: false
+        default: ''
+        type: string
+
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'configs/**'
+      - '.github/workflows/build.yml'
+
+env:
+  PROFILE: youhua_wr1200js
+  TARGET_PATH: ramips/mt7621
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.version || '21.02.7' }} / WR1200JS
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential gawk git gettext libssl-dev \
+            xsltproc wget unzip python3 file rsync zstd xz-utils
+
+      - name: 下载官方 ImageBuilder
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then VERSION="21.02.7"; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+          BASE="https://downloads.immortalwrt.org/releases/${VERSION}/targets/${TARGET_PATH}"
+          IB="immortalwrt-imagebuilder-${VERSION}-ramips-mt7621.Linux-x86_64"
+
+          for ext in zst xz; do
+            URL="${BASE}/${IB}.tar.${ext}"
+            echo "尝试: $URL"
+            if wget -q --tries=3 --timeout=180 "$URL"; then
+              echo "下载成功 (.tar.${ext})"
+              tar -xf "${IB}.tar.${ext}"
+              echo "IB_DIR=$IB" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "::error::ImageBuilder 下载失败，请确认版本号 $VERSION"
+          exit 1
+
+      - name: 组装插件列表
+        run: |
+          set -euo pipefail
+          BASE_PKGS=$(sed 's/#.*//' configs/packages.txt | tr -s '[:space:]' ' ' | xargs || true)
+          EXTRA="${{ github.event.inputs.extra_packages }}"
+          PACKAGES=$(echo "$BASE_PKGS $EXTRA" | tr -s ' ' ' ' | xargs)
+          echo "PACKAGES=$PACKAGES" >> "$GITHUB_ENV"
+          {
+            echo "### 版本"
+            echo '```'
+            echo "$VERSION"
+            echo '```'
+            echo "### 插件"
+            echo '```'
+            echo "$PACKAGES" | tr ' ' '\n'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 生成固件
+        run: |
+          set -uo pipefail
+          cd "$IB_DIR"
+
+          FILES_ARG=""
+          if [ -d "$GITHUB_WORKSPACE/configs/files" ]; then
+            FILES_ARG="FILES=$GITHUB_WORKSPACE/configs/files"
+            echo "已挂载自定义文件: $FILES_ARG"
+          fi
+
+          make info PROFILE="$PROFILE" >/dev/null 2>&1 \
+            || { echo "::error::$VERSION 中不存在 profile $PROFILE"; exit 1; }
+
+          set +e
+          # shellcheck disable=SC2086
+          make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" $FILES_ARG 2>&1 | tee build.log
+          ST=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$ST" -ne 0 ]; then
+            if grep -q "Image too big" build.log; then
+              echo "::error::固件超出 16MB Flash，请减少插件"
+            elif grep -qi "Unknown package" build.log; then
+              grep -i "Unknown package" build.log | head -20
+              echo "::error::上面的包名在该版本源中不存在"
+            else
+              echo "::error::构建失败，请查看完整日志"
+            fi
+            exit "$ST"
+          fi
+          echo "构建成功"
+
+      - name: 收集产物
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          SRC="$IB_DIR/bin/targets/ramips/mt7621"
+          cp "$SRC"/*.bin out/ 2>/dev/null || true
+          cp "$SRC"/*.manifest out/ 2>/dev/null || true
+          cd out
+          sha256sum *.bin > sha256sums.txt
+          {
+            echo "### 产物"
+            echo '```'
+            ls -lh *.bin
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传固件
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-${{ github.event.inputs.version || '21.02.7' }}-wr1200js
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
