@@ -1,24 +1,39 @@
 # ============================================================
-# WR1200JS 插件清单 —— ImmortalWrt 21.02.7 原版
+# WR1200JS 插件清单 —— ImmortalWrt 21.02.7
 # ------------------------------------------------------------
 # 一行一个包名，行尾可写注释
-# 16MB Flash：官方镜像约 8MB，剩余可加约 7MB
-# 不加任何内核参数调优、不加 zram，纯官方默认 + 下面这些包
+# 16MB Flash：官方镜像约 8MB，可用约 7MB
+# 依赖由 ImageBuilder 自动解析（kmod/usb-storage 之类会自动带上）
+# 但 luci-i18n-xxx 只是翻译包，不会自动拉 luci-app-xxx，主程序必须显式写
 # ============================================================
 
 # ---------- 中文界面 ----------
 luci-i18n-base-zh-cn
 
 # ---------- SMB 共享 ----------
-ksmbd-server                # 内核态 SMB 服务
-luci-app-ksmbd              # LuCI 管理界面
-luci-i18n-ksmbd-zh-cn       # 界面中文
+ksmbd-server
+luci-app-ksmbd
+luci-i18n-ksmbd-zh-cn
 
-# ---------- 以后想加就删掉行首的 # ----------
-# luci-app-ttyd             # 网页终端
-# luci-theme-argon          # 主题
-# luci-app-sqm              # 智能队列
-# luci-app-ddns             # 动态域名
-# luci-app-diskman          # 磁盘管理
-# luci-app-wol              # 网络唤醒
-# luci-app-filetransfer     # 网页传文件
+# ---------- USB 存储 ----------
+kmod-usb-storage
+kmod-usb-storage-extras
+kmod-fs-ext4
+fdisk
+
+# ---------- USB 网络共享（手机 USB 上网） ----------
+kmod-usb-net-rndis
+
+# ---------- ZeroTier ----------
+luci-app-zerotier
+zerotier
+luci-i18n-zerotier-zh-cn
+
+# ---------- DDNS ----------
+luci-app-ddns
+luci-i18n-ddns-zh-cn
+
+# ---------- Argon 主题 ----------
+luci-theme-argon
+luci-app-argon-config
+luci-i18n-argon-config-zh-cn
